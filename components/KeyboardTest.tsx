@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { KeyEvent } from "@/lib/types";
 import { normaliseKey } from "@/lib/keyUtils";
+import rawDialogues from "@public/dialogues.json";
 
 const PANGRAMS = [
   "the quick brown fox jumps over the lazy dog",
@@ -18,30 +19,10 @@ interface DialogueOption {
   line: string;
 }
 
-const DIALOGUES: DialogueOption[] = [
-  {
-    movie: "The Dark Knight",
-    lang: "english",
-    line: "you either die a hero or live long enough to see yourself become the villain",
-  },
-  {
-    movie: "The Godfather",
-    lang: "english",
-    line: "i'm gonna make him an offer he can't refuse",
-  },
-  {
-    movie: "Sholay (Hinglish)",
-    lang: "hinglish",
-    line: "arre o sambha, kitne aadmi the",
-  },
-  {
-    movie: "Kal Ho Naa Ho (Hinglish)",
-    lang: "hinglish",
-    line: "har pal yahan jee bhar ke jiyo, jo hai samaa kal ho naa ho",
-  },
-];
-
+const DIALOGUES = rawDialogues as DialogueOption[];
 const SEGMENT_SECONDS = 90;
+const CONSECUTIVE_ERROR_THRESHOLD = 5;
+const SYNC_PAUSE_MS = 1000;
 
 export default function KeyboardTest({
   onComplete,
@@ -54,6 +35,7 @@ export default function KeyboardTest({
   const [target, setTarget] = useState(PANGRAMS[0]);
   const [pangramIdx, setPangramIdx] = useState(0);
   const [dialogue, setDialogue] = useState<DialogueOption | null>(null);
+  const [outOfSync, setOutOfSync] = useState(false);
   const eventsRef = useRef<KeyEvent[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const pangramCharsTyped = useRef(0);
@@ -80,8 +62,13 @@ export default function KeyboardTest({
     inputRef.current?.focus();
   }, [segment]);
 
+  // refocus only after the input is actually re-enabled in the DOM (disabled inputs ignore .focus())
   useEffect(() => {
-    if (segment === "picker") return; // timer paused while choosing a dialogue
+    if (!outOfSync) inputRef.current?.focus();
+  }, [outOfSync]);
+
+  useEffect(() => {
+    if (segment === "picker" || outOfSync) return; // timer paused while choosing a dialogue or re-syncing
     const t = setInterval(() => {
       setSecondsLeft((s) => {
         if (s <= 1) {
@@ -93,7 +80,7 @@ export default function KeyboardTest({
       });
     }, 1000);
     return () => clearInterval(t);
-  }, [segment]);
+  }, [segment, outOfSync]);
 
   function pickDialogue(d: DialogueOption) {
     setDialogue(d);
@@ -131,6 +118,7 @@ export default function KeyboardTest({
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (outOfSync) return; // ignore input while paused for resync
     const val = e.target.value;
     if (segment === "pangram") {
       pangramCharsTyped.current += Math.max(0, val.length - typed.length);
@@ -148,6 +136,26 @@ export default function KeyboardTest({
         return;
       }
     }
+
+    // count consecutive mismatches trailing the cursor — a run of these means
+    // the typed text has drifted out of alignment with the target line
+    let consecutiveErrors = 0;
+    for (let i = val.length - 1; i >= 0; i--) {
+      if (val[i] !== target[i]) consecutiveErrors++;
+      else break;
+    }
+
+    if (consecutiveErrors >= CONSECUTIVE_ERROR_THRESHOLD) {
+      const correctPrefix = val.slice(0, val.length - consecutiveErrors);
+      setTyped(val);
+      setOutOfSync(true);
+      setTimeout(() => {
+        setTyped(correctPrefix);
+        setOutOfSync(false);
+      }, SYNC_PAUSE_MS);
+      return;
+    }
+
     setTyped(val);
   }
 
@@ -178,7 +186,7 @@ export default function KeyboardTest({
                     {d.lang}
                   </span>
                 </div>
-                <p className="text-xs text-muted leading-relaxed">&ldquo;{d.line}&rdquo;</p>
+                <p className="text-xs text-muted leading-relaxed">&ldquo;{d.line.substring(0, 100)}...&rdquo;</p>
               </button>
             ))}
           </div>
@@ -206,18 +214,30 @@ export default function KeyboardTest({
           />
         </div>
 
-        <div className="font-mono-tight text-xl leading-relaxed mb-8 select-none">
-          {target.split("").map((ch, i) => {
-            const typedCh = typed[i];
-            let cls = "text-muted";
-            if (typedCh != null) cls = typedCh === ch ? "text-cyan" : "text-danger";
-            if (i === typed.length) cls += " border-l-2 border-amber";
-            return (
-              <span key={i} className={cls}>
-                {ch}
+        <div className="relative">
+          {outOfSync && (
+            <div className="absolute inset-x-0 -top-2 flex justify-center z-10">
+              <span className="font-mono-tight text-xs uppercase tracking-wider bg-danger/15 text-danger border border-danger/40 rounded-full px-4 py-1.5 fade-up">
+                out of sync — pausing for a second…
               </span>
-            );
-          })}
+            </div>
+          )}
+          <div
+            className={`font-mono-tight text-xl leading-relaxed mb-8 select-none transition-opacity ${outOfSync ? "opacity-40" : ""
+              }`}
+          >
+            {target.split("").map((ch, i) => {
+              const typedCh = typed[i];
+              let cls = "text-muted";
+              if (typedCh != null) cls = typedCh === ch ? "text-cyan" : "text-danger";
+              if (i === typed.length) cls += " border-l-2 border-amber";
+              return (
+                <span key={i} className={cls}>
+                  {ch}
+                </span>
+              );
+            })}
+          </div>
         </div>
 
         <input
@@ -226,6 +246,7 @@ export default function KeyboardTest({
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onKeyUp={handleKeyUp}
+          disabled={outOfSync}
           className="absolute opacity-0 pointer-events-none"
           autoCapitalize="off"
           autoCorrect="off"
