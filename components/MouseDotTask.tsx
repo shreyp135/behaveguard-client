@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { DotTrial } from "@/lib/types";
+import { DotTrial, PathPoint } from "@/lib/types";
+import { computePathKinematics } from "@/lib/kinematics";
 
 const N_TARGETS = 25;
 const DOT_RADIUS = 22;
@@ -21,28 +22,34 @@ export default function MouseDotTask({ onComplete }: { onComplete: (trials: DotT
   const [hit, setHit] = useState(false);
   const trialsRef = useRef<DotTrial[]>([]);
   const appearedAt = useRef(0);
-  const pathRef = useRef<{ x: number; y: number; ts: number }[]>([]);
+  const pathRef = useRef<PathPoint[]>([]);
   const lastSample = useRef(0);
+  const dotRef = useRef({ x: 200, y: 200 }); // mirror dot state for handlers
 
   const placeDot = useCallback(() => {
     const area = areaRef.current;
     if (!area) return;
     const { width, height } = area.getBoundingClientRect();
-    setDot(randomPoint(width, height - 60));
+    const pt = randomPoint(width, height - 60);
+    setDot(pt);
+    dotRef.current = pt;
     appearedAt.current = performance.now();
     pathRef.current = [];
   }, []);
 
-  useEffect(() => {
-    placeDot();
-  }, [placeDot]);
+  useEffect(() => { placeDot(); }, [placeDot]);
 
-  function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
     const now = performance.now();
     if (now - lastSample.current < 16) return;
     lastSample.current = now;
     const rect = areaRef.current!.getBoundingClientRect();
-    pathRef.current.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, ts: now });
+    pathRef.current.push({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      ts: now,
+      pressure: e.pressure ?? 0.5,
+    });
   }
 
   function handleDotClick(e: React.MouseEvent) {
@@ -51,16 +58,21 @@ export default function MouseDotTask({ onComplete }: { onComplete: (trials: DotT
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
     const clickedAt = performance.now();
+    const target = dotRef.current;
+
     const trial: DotTrial = {
-      target_x: dot.x,
-      target_y: dot.y,
+      // existing fields — unchanged
+      target_x: target.x,
+      target_y: target.y,
       click_x: clickX,
       click_y: clickY,
       appeared_at: appearedAt.current,
       clicked_at: clickedAt,
       travel_time_ms: clickedAt - appearedAt.current,
-      error_px: Math.hypot(clickX - dot.x, clickY - dot.y),
+      error_px: Math.hypot(clickX - target.x, clickY - target.y),
       path: pathRef.current,
+      // new
+      kinematics: computePathKinematics(pathRef.current, target.x, target.y, DOT_RADIUS),
     };
     trialsRef.current.push(trial);
     setHit(true);
@@ -97,7 +109,7 @@ export default function MouseDotTask({ onComplete }: { onComplete: (trials: DotT
 
         <div
           ref={areaRef}
-          onMouseMove={handleMouseMove}
+          onPointerMove={handlePointerMove}
           className="relative flex-1 min-h-[420px] bg-surface border border-border rounded-xl overflow-hidden cursor-crosshair"
         >
           <p className="absolute top-3 left-1/2 -translate-x-1/2 text-xs text-muted font-mono-tight">

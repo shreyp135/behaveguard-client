@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Screen, SessionData, KeyEvent, DotTrial, DragTrial } from "@/lib/types";
 import { usePassiveMouseCollector } from "@/lib/usePassiveMouse";
 import { submitSession } from "@/lib/submit";
+import { computeKeyboardExtras } from "@/lib/kinematics";
 import StageRail from "@/components/StageRail";
 import Landing from "@/components/Landing";
 import Consent from "@/components/Consent";
@@ -30,14 +31,18 @@ export default function Home() {
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
 
   function buildSession(): SessionData {
+    const events = keyboardData.current.events;
     return {
       subject_id: subjectId.current,
       collected_at: new Date().toISOString(),
       duration_ms: performance.now() - sessionStart.current,
       keyboard: {
-        events: keyboardData.current.events,
+        // existing fields — unchanged
+        events,
         pangram_text_length: keyboardData.current.pangramLen,
         free_text_length: keyboardData.current.freeLen,
+        // new extras block computed here so it's in the final JSON
+        extras: computeKeyboardExtras(events),
       },
       mouse: {
         passive_points: passivePoints.current,
@@ -54,16 +59,10 @@ export default function Home() {
       {showRail && <StageRail current={screen} />}
 
       {screen === "landing" && <Landing onStart={() => setScreen("consent")} />}
-
       {screen === "consent" && <Consent onAgree={() => setScreen("name")} />}
 
       {screen === "name" && (
-        <NameEntry
-          onSubmit={(name) => {
-            subjectId.current = name;
-            setScreen("keyboard");
-          }}
-        />
+        <NameEntry onSubmit={(name) => { subjectId.current = name; setScreen("keyboard"); }} />
       )}
 
       {screen === "keyboard" && (
@@ -76,12 +75,7 @@ export default function Home() {
       )}
 
       {screen === "mouse-dot" && (
-        <MouseDotTask
-          onComplete={(trials) => {
-            dotTrials.current = trials;
-            setScreen("mouse-drag");
-          }}
-        />
+        <MouseDotTask onComplete={(trials) => { dotTrials.current = trials; setScreen("mouse-drag"); }} />
       )}
 
       {screen === "mouse-drag" && (
@@ -90,7 +84,7 @@ export default function Home() {
             dragTrials.current = trials;
             const data = buildSession();
             setSessionData(data);
-            submitSession(data); // fire immediately — don't wait for the user to click "finish"
+            submitSession(data);
             setScreen("analytics");
           }}
         />

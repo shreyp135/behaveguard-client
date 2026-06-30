@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { DragTrial } from "@/lib/types";
+import { DragTrial, PathPoint } from "@/lib/types";
+import { computePathKinematics } from "@/lib/kinematics";
 
 const N_DRAGS = 10;
 const CHIP_SIZE = 44;
@@ -26,7 +27,8 @@ export default function MouseDragTask({ onComplete }: { onComplete: (trials: Dra
   const trialsRef = useRef<DragTrial[]>([]);
   const startedAt = useRef(0);
   const startPos = useRef({ x: 0, y: 0 });
-  const pathRef = useRef<{ x: number; y: number; ts: number }[]>([]);
+  const zoneRef = useRef({ x: 300, y: 200 });
+  const pathRef = useRef<PathPoint[]>([]);
   const lastSample = useRef(0);
 
   const layout = useCallback(() => {
@@ -36,11 +38,10 @@ export default function MouseDragTask({ onComplete }: { onComplete: (trials: Dra
     const { start, zone } = randomNonOverlapping(width, height);
     setChip(start);
     setZone(zone);
+    zoneRef.current = zone;
   }, []);
 
-  useEffect(() => {
-    layout();
-  }, [layout, trialIdx]);
+  useEffect(() => { layout(); }, [layout, trialIdx]);
 
   function handlePointerDown(e: React.PointerEvent) {
     e.preventDefault();
@@ -60,7 +61,7 @@ export default function MouseDragTask({ onComplete }: { onComplete: (trials: Dra
     const now = performance.now();
     if (now - lastSample.current >= 16) {
       lastSample.current = now;
-      pathRef.current.push({ x, y, ts: now });
+      pathRef.current.push({ x, y, ts: now, pressure: e.pressure ?? 0.5 });
     }
   }
 
@@ -68,20 +69,26 @@ export default function MouseDragTask({ onComplete }: { onComplete: (trials: Dra
     if (!dragging) return;
     setDragging(false);
     const endedAt = performance.now();
-    const dist = Math.hypot(chip.x - (zone.x + ZONE_SIZE / 2), chip.y - (zone.y + ZONE_SIZE / 2));
+    const z = zoneRef.current;
+    const zoneCx = z.x + ZONE_SIZE / 2;
+    const zoneCy = z.y + ZONE_SIZE / 2;
+    const dist = Math.hypot(chip.x - zoneCx, chip.y - zoneCy);
     const ok = dist < ZONE_SIZE / 2;
     const trial: DragTrial = {
+      // existing fields — unchanged
       start_x: startPos.current.x,
       start_y: startPos.current.y,
       end_x: chip.x,
       end_y: chip.y,
-      zone_x: zone.x,
-      zone_y: zone.y,
+      zone_x: z.x,
+      zone_y: z.y,
       started_at: startedAt.current,
       ended_at: endedAt,
       duration_ms: endedAt - startedAt.current,
       success: ok,
       path: pathRef.current,
+      // new
+      kinematics: computePathKinematics(pathRef.current, zoneCx, zoneCy, ZONE_SIZE / 2),
     };
     trialsRef.current.push(trial);
     setSuccess(ok);
@@ -130,12 +137,7 @@ export default function MouseDragTask({ onComplete }: { onComplete: (trials: Dra
           />
           <div
             onPointerDown={handlePointerDown}
-            style={{
-              left: chip.x - CHIP_SIZE / 2,
-              top: chip.y - CHIP_SIZE / 2,
-              width: CHIP_SIZE,
-              height: CHIP_SIZE,
-            }}
+            style={{ left: chip.x - CHIP_SIZE / 2, top: chip.y - CHIP_SIZE / 2, width: CHIP_SIZE, height: CHIP_SIZE }}
             className={`absolute rounded-lg cursor-grab active:cursor-grabbing flex items-center justify-center transition-colors ${
               dragging ? "bg-amber" : "bg-cyan"
             }`}

@@ -41,6 +41,7 @@ export default function KeyboardTest({
   const pangramCharsTyped = useRef(0);
   const dialogueCharsTyped = useRef(0);
   const pendingFinish = useRef(false);
+  const shiftPressedAt = useRef<number | null>(null);
 
   const finishSegment = useCallback(() => {
     if (segment === "pangram") {
@@ -91,20 +92,26 @@ export default function KeyboardTest({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(e.key)) return;
-    const { id, category } = normaliseKey(e.key);
     const ts = performance.now();
+    if (e.key === "Shift") { shiftPressedAt.current = ts; return; }
+    if (["Control", "Alt", "Meta", "CapsLock"].includes(e.key)) return;
+    const { id, category } = normaliseKey(e.key);
+    const shift_held = shiftPressedAt.current !== null;
+    const shift_hold_ms = shift_held ? Math.round(ts - shiftPressedAt.current!) : 0;
     eventsRef.current.push({
       key_id: id,
       key_category: category,
       press_ts: ts,
       release_ts: null,
       segment: segment === "dialogue" ? "free" : "pangram",
+      shift_held,
+      shift_hold_ms,
     });
   }
 
   function handleKeyUp(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(e.key)) return;
+    if (e.key === "Shift") { shiftPressedAt.current = null; return; }
+    if (["Control", "Alt", "Meta", "CapsLock"].includes(e.key)) return;
     const ts = performance.now();
     // attach release to the most recent open event for this key id
     const { id } = normaliseKey(e.key);
@@ -223,8 +230,9 @@ export default function KeyboardTest({
             </div>
           )}
           <div
-            className={`font-mono-tight text-xl leading-relaxed mb-8 select-none transition-opacity ${outOfSync ? "opacity-40" : ""
-              }`}
+            className={`font-mono-tight text-xl leading-relaxed mb-8 select-none transition-opacity ${
+              outOfSync ? "opacity-40" : ""
+            }`}
           >
             {target.split("").map((ch, i) => {
               const typedCh = typed[i];
