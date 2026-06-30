@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Screen, SessionData, KeyEvent, DotTrial, DragTrial } from "@/lib/types";
+import { Screen, SessionData, KeyEvent, DotTrial, DragTrial, TrackTrial } from "@/lib/types";
 import { usePassiveMouseCollector } from "@/lib/usePassiveMouse";
 import { submitSession } from "@/lib/submit";
 import { computeKeyboardExtras } from "@/lib/kinematics";
@@ -11,6 +11,7 @@ import Consent from "@/components/Consent";
 import NameEntry from "@/components/NameEntry";
 import KeyboardTest from "@/components/KeyboardTest";
 import MouseDotTask from "@/components/MouseDotTask";
+import MouseTrackTask from "@/components/MouseTrackTask";
 import MouseDragTask from "@/components/MouseDragTask";
 import Analytics from "@/components/Analytics";
 import Done from "@/components/Done";
@@ -27,6 +28,7 @@ export default function Home() {
     freeLen: 0,
   });
   const dotTrials = useRef<DotTrial[]>([]);
+  const trackTrials = useRef<TrackTrial[]>([]);
   const dragTrials = useRef<DragTrial[]>([]);
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
 
@@ -48,6 +50,7 @@ export default function Home() {
         passive_points: passivePoints.current,
         dot_trials: dotTrials.current,
         drag_trials: dragTrials.current,
+        track_trials: trackTrials.current,
       },
     };
   }
@@ -75,7 +78,11 @@ export default function Home() {
       )}
 
       {screen === "mouse-dot" && (
-        <MouseDotTask onComplete={(trials) => { dotTrials.current = trials; setScreen("mouse-drag"); }} />
+        <MouseDotTask onComplete={(trials) => { dotTrials.current = trials; setScreen("mouse-track"); }} />
+      )}
+
+      {screen === "mouse-track" && (
+        <MouseTrackTask onComplete={(trials) => { trackTrials.current = trials; setScreen("mouse-drag"); }} />
       )}
 
       {screen === "mouse-drag" && (

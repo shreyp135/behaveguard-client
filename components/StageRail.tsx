@@ -7,6 +7,7 @@ const STAGES: { key: Screen; label: string; color: "amber" | "cyan" | "neutral" 
   { key: "name", label: "id", color: "neutral" },
   { key: "keyboard", label: "keyboard", color: "amber" },
   { key: "mouse-dot", label: "mouse · target", color: "cyan" },
+  { key: "mouse-track", label: "mouse · pursuit", color: "cyan" },
   { key: "mouse-drag", label: "mouse · drag", color: "cyan" },
   { key: "analytics", label: "results", color: "neutral" },
 ];

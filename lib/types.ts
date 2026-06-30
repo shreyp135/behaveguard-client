@@ -4,6 +4,7 @@ export type Screen =
   | "name"
   | "keyboard"
   | "mouse-dot"
+  | "mouse-track"
   | "mouse-drag"
   | "analytics"
   | "done";
@@ -95,6 +96,40 @@ export interface DragTrial {
   kinematics: PathKinematics;
 }
 
+export interface TrackSample {
+  cursor_x: number;
+  cursor_y: number;
+  target_x: number;
+  target_y: number;
+  offset_x: number;     // cursor_x - target_x
+  offset_y: number;     // cursor_y - target_y
+  distance_px: number;  // hypot(offset_x, offset_y)
+  ts: number;
+  pressure: number;
+}
+
+export interface TrackingDerived {
+  mean_error_px: number;
+  rms_error_px: number;
+  lag_ms: number;              // estimated temporal lag of cursor behind target (cross-correlation peak)
+  prediction_ratio: number;    // fraction of samples where cursor leads target (negative lag direction)
+  tremor_px: number;           // RMS of high-frequency micro-movement in cursor path
+  correlation_x: number;       // pearson correlation cursor_x vs target_x
+  correlation_y: number;       // pearson correlation cursor_y vs target_y
+  error_first_half_px: number; // fatigue: mean error in first half of trial
+  error_second_half_px: number;// fatigue: mean error in second half of trial
+  fatigue_delta_px: number;    // second_half - first_half (positive = degrading)
+}
+
+export interface TrackTrial {
+  pattern: "sinusoidal" | "random_walk";
+  duration_ms: number;
+  started_at: number;
+  ended_at: number;
+  samples: TrackSample[];
+  derived: TrackingDerived;
+}
+
 // ─── SESSION ───────────────────────────────────────────────────────────────
 
 export interface SessionData {
@@ -111,5 +146,6 @@ export interface SessionData {
     passive_points: MousePoint[];
     dot_trials: DotTrial[];
     drag_trials: DragTrial[];
+    track_trials: TrackTrial[]; // new — moving-target pursuit task
   };
 }

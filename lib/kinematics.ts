@@ -1,4 +1,4 @@
-import { KeyEvent, KeyboardExtras, PathPoint, PathKinematics } from "./types";
+import { KeyEvent, KeyboardExtras, PathPoint, PathKinematics, TrackSample, TrackingDerived } from "./types";
 
 // ─── PATH KINEMATICS ───────────────────────────────────────────────────────
 
@@ -79,7 +79,148 @@ export function computePathKinematics(
   };
 }
 
-// ─── KEYBOARD EXTRAS ───────────────────────────────────────────────────────
+// ─── TRACKING DERIVED STATS ─────────────────────────────────────────────────
+
+export function computeTrackingDerived(samples: TrackSample[]): TrackingDerived {
+  const empty: TrackingDerived = {
+    mean_error_px: 0,
+    rms_error_px: 0,
+    lag_ms: 0,
+    prediction_ratio: 0,
+    tremor_px: 0,
+    correlation_x: 0,
+    correlation_y: 0,
+    error_first_half_px: 0,
+    error_second_half_px: 0,
+    fatigue_delta_px: 0,
+  };
+  if (samples.length < 4) return empty;
+
+  // mean / rms error
+  const dists = samples.map((s) => s.distance_px);
+  const mean_error_px = dists.reduce((a, b) => a + b, 0) / dists.length;
+  const rms_error_px = Math.sqrt(dists.reduce((a, b) => a + b * b, 0) / dists.length);
+
+  // approximate sample interval (ms)
+  const dt =
+    samples.length > 1
+      ? (samples[samples.length - 1].ts - samples[0].ts) / (samples.length - 1)
+      : 16;
+
+  // lag via cross-correlation: shift target series against cursor series,
+  // find shift (in samples) that minimizes mean distance error on the x-axis
+  const maxShift = Math.min(30, Math.floor(samples.length / 4)); // ~480ms at 16ms sampling
+  let bestShift = 0;
+  let bestErr = Infinity;
+  for (let shift = -maxShift; shift <= maxShift; shift++) {
+    let err = 0;
+    let count = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const j = i + shift;
+      if (j < 0 || j >= samples.length) continue;
+      const dx = samples[i].cursor_x - samples[j].target_x;
+      const dy = samples[i].cursor_y - samples[j].target_y;
+      err += Math.hypot(dx, dy);
+      count++;
+    }
+    if (count > 0) {
+      const avg = err / count;
+      if (avg < bestErr) {
+        bestErr = avg;
+        bestShift = shift;
+      }
+    }
+  }
+  // positive shift means cursor[i] best matches target[i+shift] i.e. cursor is behind (lagging)
+  const lag_ms = Math.round(bestShift * dt);
+
+  // prediction ratio: fraction of samples where cursor is "ahead" of target
+  // (cursor's instantaneous direction-projected position leads target's recent motion)
+  let leadCount = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const targetMoveX = samples[i].target_x - samples[i - 1].target_x;
+    const targetMoveY = samples[i].target_y - samples[i - 1].target_y;
+    const cursorAheadX = samples[i].cursor_x - samples[i].target_x;
+    const cursorAheadY = samples[i].cursor_y - samples[i].target_y;
+    const dot = targetMoveX * cursorAheadX + targetMoveY * cursorAheadY;
+    if (dot > 0) leadCount++;
+  }
+  const prediction_ratio = parseFloat((leadCount / (samples.length - 1)).toFixed(3));
+
+  // tremor: RMS of high-frequency component of cursor path (2nd derivative-ish jitter),
+  // computed as RMS of deviation from a short moving-average of the cursor path
+  const window = 5;
+  let tremorSumSq = 0;
+  let tremorCount = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const lo = Math.max(0, i - window);
+    const hi = Math.min(samples.length - 1, i + window);
+    let sx = 0,
+      sy = 0,
+      n = 0;
+    for (let k = lo; k <= hi; k++) {
+      sx += samples[k].cursor_x;
+      sy += samples[k].cursor_y;
+      n++;
+    }
+    const avgX = sx / n;
+    const avgY = sy / n;
+    const dx = samples[i].cursor_x - avgX;
+    const dy = samples[i].cursor_y - avgY;
+    tremorSumSq += dx * dx + dy * dy;
+    tremorCount++;
+  }
+  const tremor_px = parseFloat(Math.sqrt(tremorSumSq / tremorCount).toFixed(3));
+
+  // pearson correlation helper
+  function pearson(a: number[], b: number[]): number {
+    const n = a.length;
+    const meanA = a.reduce((x, y) => x + y, 0) / n;
+    const meanB = b.reduce((x, y) => x + y, 0) / n;
+    let num = 0,
+      denA = 0,
+      denB = 0;
+    for (let i = 0; i < n; i++) {
+      const da = a[i] - meanA;
+      const db = b[i] - meanB;
+      num += da * db;
+      denA += da * da;
+      denB += db * db;
+    }
+    const den = Math.sqrt(denA * denB);
+    return den === 0 ? 0 : num / den;
+  }
+  const correlation_x = parseFloat(
+    pearson(samples.map((s) => s.cursor_x), samples.map((s) => s.target_x)).toFixed(3)
+  );
+  const correlation_y = parseFloat(
+    pearson(samples.map((s) => s.cursor_y), samples.map((s) => s.target_y)).toFixed(3)
+  );
+
+  // fatigue: compare mean error in first half vs second half
+  const half = Math.floor(samples.length / 2);
+  const firstHalf = dists.slice(0, half);
+  const secondHalf = dists.slice(half);
+  const error_first_half_px = firstHalf.length
+    ? firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length
+    : 0;
+  const error_second_half_px = secondHalf.length
+    ? secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length
+    : 0;
+
+  return {
+    mean_error_px: Math.round(mean_error_px),
+    rms_error_px: Math.round(rms_error_px),
+    lag_ms,
+    prediction_ratio,
+    tremor_px,
+    correlation_x,
+    correlation_y,
+    error_first_half_px: Math.round(error_first_half_px),
+    error_second_half_px: Math.round(error_second_half_px),
+    fatigue_delta_px: Math.round(error_second_half_px - error_first_half_px),
+  };
+}
 
 export function computeKeyboardExtras(events: KeyEvent[]): KeyboardExtras {
   const alphaEvents = events
