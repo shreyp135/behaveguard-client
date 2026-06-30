@@ -14,13 +14,13 @@ const PATTERNS: { id: Pattern; label: string; durationMs: number; blurb: string 
     id: "sinusoidal",
     label: "smooth wave",
     durationMs: 20000,
-    blurb: "the dot moves left and right in a smooth wave — stay glued to it",
+    blurb: "the dot moves left and right in an oscillating pattern — match your cursor to it, don't click",
   },
   {
     id: "random_walk",
     label: "random drift",
     durationMs: 20000,
-    blurb: "the dot makes small unpredictable jumps — react and correct",
+    blurb: "the dot follows a small unpredictable path — match your cursor to it, don't click",
   },
 ];
 
